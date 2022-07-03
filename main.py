@@ -10,12 +10,16 @@ import imageio
 import numpy as np
 import torch
 import nvdiffrast.torch as dr
+from torch import optim
+import cv2
 
 from numpy import random
 
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(device)
 
 def tensor(*args, **kwargs):
-    return torch.tensor(*args, device='cuda', **kwargs)
+    return torch.tensor(*args, device=device, **kwargs)
 
 arr_pos = []
 arr_col = []
@@ -25,33 +29,67 @@ def get_coord(theta, center, radius):
     return np.array([np.cos(theta) * radius + center[0], np.sin(theta) * radius + center[1]])
 
 def save_img(img, imgname):
-    img = img.cpu().numpy()[0, ::-1, :, :] # Flip vertically.
-    img = np.clip(np.rint(img * 255), 0, 255).astype(np.uint8) # Quantize to np.uint8
-    print("Saving to {}.".format(imgname))
-    imageio.imsave(imgname, img)
+    with torch.no_grad():
+        img = img.cpu().numpy()[0, :, :, :]
+        img = np.clip(np.rint(img * 255), 0, 255).astype(np.uint8) # Quantize to np.uint8
+        print("Saving to {}.".format(imgname))
+        imageio.imsave(imgname, img)
 
 num_triangles = 100
 boundary = 0.8
+
+xy_coords = torch.zeros([num_triangles * 3, 2], dtype=torch.float32).to(device)
+# col_value = torch.zeros([num_triangles * 3, 1], dtype=torch.float32).to(device)
+
 for i in range(num_triangles):
     center = (random.uniform(-boundary, boundary), random.uniform(-boundary, boundary))
     radius = random.uniform(0.05, 0.07)
     theta = random.uniform(0, np.pi)
     for j in range(3):
         coord = get_coord(theta + j * 2.0 * np.pi / 3.0, center, radius)
-        arr_pos.append([coord[0], coord[1], 0, 1])
+        xy_coords[3 * i + j, 0], xy_coords[3 * i + j, 1] = coord[0], coord[1]
         arr_col.append([0.5, 0.5, 0.5])
+        # col_value[3 * i + j, 0] = 0.5
     arr_tri.append([3 * i, 3 * i + 1, 3 * i + 2])
 
-pos = tensor([arr_pos], dtype=torch.float32)
-col = tensor([arr_col], dtype=torch.float32)
+col = tensor([arr_col], dtype=torch.float32).requires_grad_().to(device)
 tri = tensor(arr_tri, dtype=torch.int32)
+xy_coords.requires_grad_()
+# col_value.requires_grad_()
 
 glctx = dr.RasterizeGLContext()
-rast, _ = dr.rasterize(glctx, pos, tri, resolution=[256, 256])
-out, _ = dr.interpolate(col, rast, tri)
+render_resolution = [256, 256]
 
-img = dr.antialias(out, rast, pos, tri)
+
+target_img = cv2.imread("canada.png").astype(np.float32) / 255.0
+target_img = cv2.cvtColor(target_img, cv2.COLOR_BGR2RGB)
+target_img = cv2.resize(target_img, render_resolution)
+cv2.imwrite('check.png', cv2.cvtColor(target_img * 255, cv2.COLOR_RGB2BGR))
+target_img = torch.Tensor(target_img).to(device)
+
+epochs = 1000
+# optimizer = optim.Adam([xy_coords], lr=0.001)
+optimizer = optim.Adam([xy_coords, col], lr=0.001)
+for i in range(epochs):
+    optimizer.zero_grad()
+    pos = torch.zeros([num_triangles * 3, 4], dtype=torch.float32).to(device)
+    pos[:,0:2] = xy_coords
+    pos[:, 3] = 1
+
+    # col = torch.zeros([num_triangles * 3, 3], dtype=torch.float32).requires_grad_().to(device)
+    # col[:, 0] = col_value[:,0]
+    # col[:, 1] = col_value[:,0]
+    # col[:, 2] = col_value[:,0]
+
+    pos = torch.unsqueeze(pos, 0)
+    rast, _ = dr.rasterize(glctx, pos, tri, resolution=render_resolution)
+    out, _ = dr.interpolate(col, rast, tri)
+
+    img = dr.antialias(out, rast, pos, tri)
+    loss = torch.nn.functional.mse_loss(target_img.unsqueeze(0), img)
+    print("epoch={}, loss={}".format(i, loss))
+    loss.backward()
+    optimizer.step()
 
 save_img(img, "tri.png")
-save_img(out, "out.png")
 
