@@ -39,7 +39,7 @@ num_triangles = 100
 boundary = 0.8
 
 xy_coords = torch.zeros([num_triangles * 3, 2], dtype=torch.float32).to(device)
-# col_value = torch.zeros([num_triangles * 3, 1], dtype=torch.float32).to(device)
+tri_col_value = torch.zeros([num_triangles, 3], dtype=torch.float32).to(device)
 
 for i in range(num_triangles):
     center = (random.uniform(-boundary, boundary), random.uniform(-boundary, boundary))
@@ -48,14 +48,14 @@ for i in range(num_triangles):
     for j in range(3):
         coord = get_coord(theta + j * 2.0 * np.pi / 3.0, center, radius)
         xy_coords[3 * i + j, 0], xy_coords[3 * i + j, 1] = coord[0], coord[1]
-        arr_col.append([0.5, 0.5, 0.5])
+        # arr_col.append([0.5, 0.5, 0.5])
         # col_value[3 * i + j, 0] = 0.5
     arr_tri.append([3 * i, 3 * i + 1, 3 * i + 2])
 
-col = tensor([arr_col], dtype=torch.float32).requires_grad_().to(device)
+# col = tensor([arr_col], dtype=torch.float32).requires_grad_().to(device)
 tri = tensor(arr_tri, dtype=torch.int32)
 xy_coords.requires_grad_()
-# col_value.requires_grad_()
+tri_col_value.requires_grad_()
 
 glctx = dr.RasterizeGLContext()
 render_resolution = [256, 256]
@@ -67,19 +67,20 @@ target_img = cv2.resize(target_img, render_resolution)
 cv2.imwrite('check.png', cv2.cvtColor(target_img * 255, cv2.COLOR_RGB2BGR))
 target_img = torch.Tensor(target_img).to(device)
 
-epochs = 1000
+epochs = 3000
 # optimizer = optim.Adam([xy_coords], lr=0.001)
-optimizer = optim.Adam([xy_coords, col], lr=0.001)
+# optimizer = optim.Adam([xy_coords, col], lr=0.001)
+optimizer = optim.Adam([xy_coords, tri_col_value], lr=0.01)
 for i in range(epochs):
     optimizer.zero_grad()
     pos = torch.zeros([num_triangles * 3, 4], dtype=torch.float32).to(device)
     pos[:,0:2] = xy_coords
     pos[:, 3] = 1
 
-    # col = torch.zeros([num_triangles * 3, 3], dtype=torch.float32).requires_grad_().to(device)
-    # col[:, 0] = col_value[:,0]
-    # col[:, 1] = col_value[:,0]
-    # col[:, 2] = col_value[:,0]
+    col = torch.zeros([num_triangles * 3, 3], dtype=torch.float32).requires_grad_().to(device)
+    col[torch.arange(0, 3 * num_triangles, 3), :] = tri_col_value[:, :]
+    col[torch.arange(1, 3 * num_triangles, 3), :] = tri_col_value[:, :]
+    col[torch.arange(2, 3 * num_triangles, 3), :] = tri_col_value[:, :]
 
     pos = torch.unsqueeze(pos, 0)
     rast, _ = dr.rasterize(glctx, pos, tri, resolution=render_resolution)
