@@ -35,7 +35,7 @@ def save_img(img, imgname):
         print("Saving to {}.".format(imgname))
         imageio.imsave(imgname, img)
 
-num_triangles = 100
+num_triangles = 200
 boundary = 0.8
 
 xy_coords = torch.zeros([num_triangles * 3, 2], dtype=torch.float32).to(device)
@@ -61,13 +61,13 @@ glctx = dr.RasterizeGLContext()
 render_resolution = [256, 256]
 
 
-target_img = cv2.imread("images/canada.png").astype(np.float32) / 255.0
+target_img = cv2.imread("images/pug.jpg").astype(np.float32) / 255.0
 target_img = cv2.cvtColor(target_img, cv2.COLOR_BGR2RGB)
 target_img = cv2.resize(target_img, render_resolution)
 cv2.imwrite('check.png', cv2.cvtColor(target_img * 255, cv2.COLOR_RGB2BGR))
 target_img = torch.Tensor(target_img).to(device)
 
-epochs = 1000
+epochs = 2000
 # optimizer = optim.Adam([xy_coords], lr=0.001)
 optimizer = optim.Adam([xy_coords, col], lr=0.001)
 for i in range(epochs):
